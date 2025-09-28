@@ -1,0 +1,12 @@
+.input{
+    background-color: #2d2d2d;
+    padding: 19px 60px;
+    padding-left: 40px;
+    border-radius: 33px;
+}
+
+.grad{
+background: #d6adff;
+background: linear-gradient(159deg, rgba(214, 173, 255, 1) 1%, rgba(117, 60, 222, 1) 51%, rgba(52, 41, 204, 1) 100%);
+
+}
