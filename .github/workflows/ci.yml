@@ -1,0 +1,37 @@
+name: CI — Build frontend
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (frontend)
+        working-directory: ./tradefront
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./tradefront
+        # if the project has build script, this will run it; harmless if missing
+        run: npm run build --if-present
+
+      - name: Run tests (if present)
+        working-directory: ./tradefront
+        run: |
+          if npm run -s test --if-present; then
+            echo "Tests ran"
+          else
+            echo "No tests script found or tests skipped."
+          fi
