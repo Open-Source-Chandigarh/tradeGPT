@@ -30,7 +30,7 @@ docker model pull ai/embeddinggemma
 2️⃣ go to books/code
 
 copy .env.example to .env
-populate qdrant api keys and url qdrant cloud
+populate qdrant api keys and url from qdrant cloud
 ```bash
 npm i
 node generateEmbeddings
@@ -43,7 +43,7 @@ uvicorn api:app --reload
 ```
 
 4️⃣ go to tradefront
-copy .env to .env.example
+copy .env.example to .env
 and populate all .env fields
 if you are using local model then leave openai_api_key empty
 
