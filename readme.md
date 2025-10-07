@@ -32,6 +32,7 @@ docker model pull ai/embeddinggemma
 copy .env.example to .env
 populate qdrant api keys and url qdrant cloud
 ```bash
+npm i
 node generateEmbeddings
 ```
 
