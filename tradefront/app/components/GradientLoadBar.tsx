@@ -6,7 +6,7 @@ interface LoadingBarProps {
   duration?: number; // in seconds, default 240s = 4min
 }
 
-export default function GradientLoadingBar({ duration = 240 }: LoadingBarProps) {
+export default function GradientLoadingBar({ duration = 120 }: LoadingBarProps) {
   const [progress, setProgress] = useState(0);
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function GradientLoadingBar({ duration = 240 }: LoadingBarProps) 
 
   return (
     <div>
-    <div className='mb-1 text-[#ffffff9c] text-sm'>It Usually takes 4 min</div>
+    <div className='mb-1 text-[#ffffff9c] text-sm'>It Usually takes 2 min</div>
     <div className='mb-1 text-white '>We are fetching detilas of your stock and traning our model though which we will be able to make more acurate predictions please wait </div>
     <GradientTextLoading />
     <div className="relative w-full h-6 bg-gray-800 rounded-xl overflow-hidden shadow-lg">

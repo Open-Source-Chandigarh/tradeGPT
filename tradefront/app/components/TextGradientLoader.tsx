@@ -7,7 +7,7 @@ type TextGradientLoaderProps = {
 
 const texts = ["Fetching Data", "Cleaning Data", "Training Model"];
 
-export default function TextGradientLoader({ duration = 240 }: TextGradientLoaderProps) {
+export default function TextGradientLoader({ duration = 120 }: TextGradientLoaderProps) {
   const [text, setText] = useState(texts[0]);
   const [dots, setDots] = useState("");
 
@@ -26,10 +26,10 @@ export default function TextGradientLoader({ duration = 240 }: TextGradientLoade
     const startTime = Date.now();
 
     const interval = setInterval(() => {
-      const elapsed = (Date.now() - startTime) / 1000;
+      const elapsed = (Date.now() - startTime) / 500;
       const index = Math.min(Math.floor(elapsed / segment), texts.length - 1);
       setText(texts[index]);
-    }, 600);
+    }, 200);
 
     return () => clearInterval(interval);
   }, [duration]);

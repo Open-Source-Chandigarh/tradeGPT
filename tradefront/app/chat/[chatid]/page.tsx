@@ -23,6 +23,8 @@ type Chat = {
   extramsg?:string;
   content?: string | null ;
   stockstypes?:Array<any>;
+  used?:boolean;
+  completed?:boolean;
 };
 
 type ServerResponse = {
@@ -31,9 +33,12 @@ type ServerResponse = {
 
 export default function page({ params }: { params: Promise<{ chatid: string }> }) {
 
+
   // {type:"whichstock",by:"server",extramsg:"Which Stock you are talking about?",stockstypes:[{logo:"https://rilstaticasset.akamaized.net/sites/default/files/2023-02/L.1.jpg", name:"RELIANCE.NS" ,price:"₹30.33"}]}
   // {type:"modeltraning",by:"server",content:"hello world"}
   const router = useRouter();
+
+
 
   const [chats, setChats] = useState<Chat[]>([]);
   const [freechat, setFreeChat] = useState("");
@@ -57,6 +62,7 @@ useEffect(() => {
 
       await sendques(leftprompt); // your async function to handle question
       localStorage.setItem("promptinput", "");
+      
     }
   };
 
@@ -271,9 +277,10 @@ async function sendques(ques:string) {
 
         if(res.status==200){
           setloadingai(false)
-        // setChats((chat)=>[...chat,data.toappend])
-        if(data.toappend.by=="server"){
-          setChats((chat)=>[...chat,data.toappend])
+          // setChats((chat)=>[...chat,data.toappend])
+          if(data.by=="server"){
+          setRunning(false)
+          await setChats((chat)=>[...chat,data])
         }else{
           appendChatWithTypewriter(data.toappend);
         }
@@ -306,6 +313,40 @@ async function handleStop() {
   "Should I hedge Tata Motors with a Put?",
   "Is today the right day to go long on HUL?"
 ]);
+
+
+
+
+const handleStockClick = (stock: any) => {
+  setChats((prevChats) => {
+    if (prevChats.length === 0) return prevChats;
+
+    const updatedChats = [...prevChats];
+    const lastChat = { ...updatedChats[updatedChats.length - 1] };
+
+    if (lastChat.type === "whichstock" && Array.isArray(lastChat.stockstypes)) {
+      lastChat.stockstypes = lastChat.stockstypes.map((s: any) =>
+        s.symbol === stock.symbol
+          ? { ...s, selected: true }
+          : { ...s, selected: false }
+      );
+
+
+      lastChat.used = true;
+      updatedChats[updatedChats.length - 1] = lastChat;
+    }
+    console.log(updatedChats)
+
+    return updatedChats;
+  });
+
+  sendques(`i want to know about ${stock.name} stock with symbol ${stock.symbol} on ${stock.exchange}`);
+};
+
+
+
+
+
 
 
 
@@ -383,7 +424,7 @@ async function handleStop() {
 
     { chats.length>0&&
     <div className='w-full  flex justify-center'>
-      <div className='flex flex-col  min-w-3xl max-w-3xl mt-20 '>
+      <div className='flex flex-col  min-w-3xl max-w-4xl mt-20 '>
 
 
 {chats.map((data, i) => {
@@ -408,6 +449,7 @@ async function handleStop() {
       </div>
     )
   }
+   if (data.by === "server") {
   if (data.type === "modeltraning") {
     return (
       <GradientLoadingBar key={i} duration={240} />
@@ -415,13 +457,15 @@ async function handleStop() {
   }
   if (data.type === "whichstock") {
     return (
-      <div key={i}>
+      <div key={i} className={`${data.used?"select-none":""}`}>
 
         <div className='mb-2'>{data.extramsg}</div>
         <div className='w-full flex items-left font-sans flex-wrap'>
         {data.stockstypes?.map((stock, i) => (
-          <div key={i} className=" flex flex-col items-center px-2 mx-2 mb-4 pb-2 py-4 rounded-sm bg-[#8484844f] cursor-pointer hover:bg-[#2f2e2e] active:bg-[#8484844f]">
-            <img className ='w-[200px] pb-2' src={stock.symbol} alt="logo" />
+
+          <div onClick={() => !(data.used)?handleStockClick(stock):null} key={i} className={`flex flex-col items-center px-2 mx-2 mb-4 bg-[#8484844f] pb-2 py-4 rounded-sm ${data.used?'':'cursor-pointer'}  ${data.used?"":"hover:bg-[#2f2e2e]"}  ${stock.selected ? "bg-[white]" : "bg-[#8484844f]"}    ${!(stock.selected)?'text-["#acabab"]':'text-[black]'}`}>
+            {/* <img className ='w-[200px] pb-2' src={stock.logoname} alt="logo" /> */}
+            <div className ={`w-[200px] pb-2 text-center ${!(stock.selected)?'text-["#acabab"]':'text-[black]'}  font-[800]`}  >{stock.symbol}</div>
             {stock.name} - {stock.exchange}
           </div>
         ))}
@@ -430,6 +474,7 @@ async function handleStop() {
       </div>
     )
   }
+  } 
 
   return null
 })}

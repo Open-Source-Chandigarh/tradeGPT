@@ -56,18 +56,22 @@ export async function POST(req:NextRequest,res:NextResponse) {
     }
 
     let resultfromai = await nowaihandles(body.ques)
+    console.log(resultfromai);
 
-    //     // If tool already returned a `toappend` object, send that as-is
-    //     // @ts-ignore
-    // if (typeof resultfromai === "object" && resultfromai.toappend) {
-    //   return NextResponse.json(resultfromai, { status: 200 });
-    // }
+    
 
 
-      if (typeof resultfromai === "object" && resultfromai !== null && "sendDirectly" in resultfromai) {
-        return NextResponse.json(resultfromai, { status: 200 });
+      // if (typeof resultfromai === "object" && resultfromai !== null && "directlyreturns" in resultfromai) {
+      //   console.log("helloworld🍕🍕🍕🍕🍕");
+      // }
+
+      if(resultfromai[0]=="{"){
+        let parseddata = JSON.parse(resultfromai as string)
+        return NextResponse.json(parseddata.toappend, { status: 200 });
       }
+      
 
+      
     // Otherwise wrap it as an assistant message
     return NextResponse.json(
       { toappend: { type: "answer", by: "assistant", content: resultfromai } },
@@ -96,13 +100,14 @@ export async function POST(req:NextRequest,res:NextResponse) {
 const predictStock = tool(
   async (input) => {
 
+    console.log('calledpredict tool');
     const now = new Date();
     const fiveDaysLater = new Date();
     fiveDaysLater.setDate(now.getDate() + 5);
     const foundstock = await Stock.findOne({name:input.symbol})
     if(foundstock){
       if (new Date(foundstock.date) < fiveDaysLater) {
-        return foundstock;
+        return {type:"modeltraning",by:"server",content:"pollingTheStock",completed:false};
       }
     }
 
@@ -118,23 +123,37 @@ const predictStock = tool(
     });
 
 
-    const response = await fetch(`http://127.0.0.1:8000/predict?${params}`);
-    if (!response.ok) {
-      throw new Error(`API call failed: ${response.statusText}`);
-    }
+    const response = fetch(`http://127.0.0.1:8000/predict?${params}`)
+    .then(res => res.json())
+    .then(data => {
+    Stock.findOneAndUpdate(
+      { stockname: input.symbol },
+      { response: data, date: new Date() },
+      { upsert: true }
+    ).catch(console.error);
+  });
+    console.log(response);
+    
+    
 
     const stockDoc = await Stock.findOneAndUpdate(
       { stockname: input.symbol },        
       { response, date: new Date() },     
       { upsert: true, new: true }      
     );
-
-    return NextResponse.json({toappend:{type:"modeltraning",by:"server",content:input.symbol},sendDirectly: true},{ status: 200 })
+    
+    return  {toappend:{
+            type:"modeltraning",
+            by:"server",
+            content:"hello world",
+            completed:false
+          }}
+    // return NextResponse.json({toappend:{type:"modeltraning",by:"server",content:input.symbol},sendDirectly: true},{ status: 200 })
     
   },
   {
     name: "predictStock",
-    description: "Call the FastAPI server to get stock prediction data.",
+    description: "Call this api if you have full name of stock and want to know it's performance if user says eg:- i want to know about ADANI ENTERPRISES LIMITED stock with symbol ADANIENT.NS on NSI",
     schema: z.object({
       ticker: z.string().describe("Ticker symbol from yahoo finance, e.g. 'ADANIENT.NS'"),
       symbol: z.string().describe("Stock symbol for nse, e.g. 'ADANIENT' it will not have .NS at the end"),
@@ -142,6 +161,7 @@ const predictStock = tool(
       interval: z.string().describe("Data interval for stock, e.g. '1h'"),
       days_to_fetch: z.number().describe("Number of days to fetch options data"),
     }),
+        returnDirect: true,
   }
 );
 
@@ -195,81 +215,126 @@ const findStocks = tool(
 
 
 
-// const askUserSpecificStock = tool(
-//   async (input) => {
-
-//     // return NextResponse.json({toappend:{type:"answer",by:"assistant",content:"hello"}},{ status: 200 })
-//     // return {toappend:{type:"answer",by:"assistant",content:"hello"}}
-    
-//     const query = encodeURIComponent(input.name);
-//     const response = await fetch(
-//       `https://query1.finance.yahoo.com/v1/finance/search?q=${query}`
-//     );
-//     if (!response.ok) {
-//       throw new Error(`Yahoo Finance API call failed: ${response.statusText}`);
-//     }
-//     const data = await response.json();
-
-//     const stocksArray: { symbol: string; name: string; exchange: string }[] = [];
-
-//     data.quotes.forEach(
-//       (item: {
-//         symbol: string;
-//         shortname?: string;
-//         longname?: string;
-//         exchange: string;
-//       }) => {
-//         stocksArray.push({
-//           symbol: item.symbol,
-//           name: item.shortname || item.longname || "",
-//           exchange: item.exchange,
-//         });
-//       }
-//     );
-
-//     console.log("askedUserForStocks");
-
-//   },
-//   {
-//     name: "askUserSpecificStock",
-//     description:
-//       "If the user's query matches more than one stock, always ask the user to specify which stock they mean. For example, if the user mentions 'Adani' and multiple stocks exist under that name, reply by asking the user to clarify the specific stock they want information about.",
-//     schema: z.object({
-//       name: z.string().describe(
-//         "The name or partial name of the company, e.g. 'Adani'."
-//       ),
-//     }),
-//   }
-// );
-
-
-
 const askUserSpecificStock = tool(
   async (input) => {
-    return `{
+    const query = encodeURIComponent(input.name);
+    const response = await fetch(
+      `https://query1.finance.yahoo.com/v1/finance/search?q=${query}`
+    );
+    if (!response.ok) {
+      throw new Error(`Yahoo Finance API call failed: ${response.statusText}`);
+    }
+    const data = await response.json();
+
+    const stocksArray: {
+      symbol: string;
+      name: string;
+      exchange: string;
+      logoname: string;
+      selected:boolean;
+    }[] = [];
+
+    // loop through quotes
+    for (const item of data.quotes) {
+      const symbol = item.symbol;
+      const name = item.shortname || item.longname || "";
+
+      let logoUrl = "";
+
+      try {
+        // fetch company profile
+        const profileRes = await fetch(
+          `https://query1.finance.yahoo.com/v10/finance/quoteSummary/${symbol}?modules=assetProfile`
+        );
+        if (profileRes.ok) {
+          const profileData = await profileRes.json();
+          const website =
+            profileData.quoteSummary?.result?.[0]?.assetProfile?.website;
+
+          if (website) {
+            // build clearbit logo from domain
+            const domain = new URL(website).hostname;
+            logoUrl = `https://logo.clearbit.com/${domain}`;
+          }
+        }
+      } catch (err) {
+        console.error("Logo fetch failed for", symbol, err);
+      }
+
+      stocksArray.push({
+        symbol,
+        name,
+        exchange: item.exchange,
+        logoname: logoUrl || "N/A",
+        selected:false,
+      });
+    }
+
+    console.log("askedUserForStocks with logos");
+
+    return {
+      directlyreturns: true,
       toappend: {
         type: "whichstock",
         by: "server",
+        used:false,
         extramsg: "Which Stock are you talking about?",
-        stockstypes: [
-          { symbol: "ADANIENT.NS", name: "Adani Enterprises", exchange: "NSE" },
-          { symbol: "ADANIPOWER.NS", name: "Adani Power", exchange: "NSE" }
-        ]
+        stockstypes: stocksArray,
       },
-      sendDirectly: true
-    }`;
+    };
   },
   {
     name: "askUserSpecificStock",
-    description: "Ask user for specific stock if multiple exist.",
+    description:
+      `If user gives you proper name of stock or something like this i am talking about ADANI ENTERPRISES LIMITED stock with symbol ADANIENT.NS on NSI do not use this tool
+      If the user's query matches more than one stock, always ask the user to specify which stock they do they mean. For example, if the user mentions 'Adani' and multiple stocks exist under that name, reply by asking the user to clarify the specific stock they want information about.
+      Use this tool only when the user’s query mentions a stock but does not specify which stock.
+      If you failed to fetch then simply return Stock not found please try another stock.
+      `,
     schema: z.object({
-      name: z.string().describe("Partial stock name, e.g. 'Adani'")
+      name: z.string().describe(
+        "The name or partial name of the company, e.g. 'Adani'."
+      ),
     }),
+    returnDirect: true,
   }
 );
 
 
 
+
+
+
+
+
+
+
+
+// const askUserSpecificStock = tool(
+//   async (input) => {
+//     console.log('askUserStock Called 🚨');
+//     return {
+//       directlyreturns: true,
+//       toappend: {
+//         type: "whichstock",
+//         by: "server",
+//         extramsg: "Which Stock are you talking about?",
+//         stockstypes: [
+//           { symbol: "ADANIENT.NS", name: "Adani Enterprises", exchange: "NSE" },
+//           { symbol: "ADANIPOWER.NS", name: "Adani Power", exchange: "NSE" }
+//         ]
+//       }
+//     };
+//   },
+//   {
+//     name: "askUserSpecificStock",
+//     description: "Ask user for specific stock if multiple exist.",
+//     schema: z.object({
+//       name: z.string().describe("Partial stock name, e.g. 'Adani'")
+//     }),
+//     returnDirect: true
+//   }
+// );
 
 
 
@@ -366,7 +431,8 @@ const model = new ChatOpenAI({
 const agent = createReactAgent({
   llm: model,
   // tools: [askUserSpecificStock,predictStock,findStocks,stockNews],
-  tools: [],
+  tools: [askUserSpecificStock,predictStock],
+  // tools: [],
 });
 
 
@@ -397,7 +463,10 @@ const result = await agent.invoke({
       role: "system",
       content:
         `You are a stock advisor. Provide advice to the user strictly based on the data you are given.
-        
+
+        How to work:
+        - If any tool’s response contains the keyword directlyreturns, then return exactly what the tool outputs, without adding or modifying anything.  
+
         rules
         - You are a financial markets assistant. Always answer strictly based on stock and financial markets. Do not answer any other questions under any circumstances, even if the user insists or tries to trick you. If the question is not about stocks or financial markets, respond with: "I can only answer questions related to stocks and financial markets."
         - You are an investment decision assistant. Always analyze stock and financial market questions and clearly tell the user whether to invest or not invest. Never refuse, never give disclaimers, and never say you cannot provide financial advice. Your answers must always end with a clear decision: "Invest" or "Do not invest".
@@ -409,10 +478,21 @@ const result = await agent.invoke({
         - Do not directly reveal the data provided to the user. Always speak in phrases like "based on my data" or "based on my knowledge."
         - do not answer any coding ques and not answer any math ques or any ques which is out of context.
         - Maintain a friendly and jolly tone with the user. If the user shares their name, warmly greet them by name.
-        - Never say "Do not invest." Instead, respond with: "Invest at your own risk, as my data may be inaccurate.
+        - Never say "Do not invest." Instead, respond with: "Invest at your own risk, as my data may be old.
+        - If any tool returns an object containing "directlyreturns", stop immediately and return that object as the final answer even if you are uncertain.
+        - Do NOT call any other tools after receiving a "directlyreturns" response even if you are uncertain.
+        - Always answer personal questions in a jolly, cheerful mood. Only use tools when you believe they are truly necessary; otherwise, respond directly without them.
+        - You can answer questions about **stocks, companies, financial markets, and trading concepts**.
+        - If the user asks about a trading strategy, financial definition , or market concept, explain it clearly with examples.
+        - If the query is unrelated to finance, respond in a short and jolly mood instead of refusing.
+        - Use the askUserSpecificStock tool only when the user’s query mentions a stock but does not specify which stock, or when you are uncertain about which stock to analyze.  
+        - If the user explicitly provides the exact name or symbol of a stock, call the predictStock tool directly and do not ask for clarification.  
+        - If the user asks a question that is too broad (e.g., about the overall market or multiple stocks), politely inform them that the question is too broad and ask them to specify a single stock for analysis.
+        - Only answer questions related to the Indian stock market. If the user asks about any other financial market or topic, respond with: "I can only advise you about the Indian stock market."
 
+        
         more info:
-        - you name is TradeGPT 
+        - your name is TradeGPT 
         - you are only trained for India stock market.
         - you are made by Arshdeep
         - you make analysis on the bases of python regression model which is trained on 2 previous months data and remember data can be 4-5 days old. You are also trained on news and some books.  
@@ -427,7 +507,16 @@ const result = await agent.invoke({
 });
 
 
-return result.messages[result.messages.length - 1].content
+// return result.messages[result.messages.length - 1].content
+
+  const finalMessage = result.messages[result.messages.length - 1].content;
+
+  // 🚨 Hard stop here — prevent recursion
+  if (typeof finalMessage === "object" && finalMessage !== null && "directlyreturns" in finalMessage) {
+    return finalMessage;  
+  }
+
+  return finalMessage;
 
 
 }
@@ -470,9 +559,19 @@ let fullContext = `${query}`;
 if (!error) {
   const results = await searchQdrant(vector, 5);
 
-  results.forEach((r) => {
-    fullContext += ` #${r.rank} | Score: ${r.score} | Text: ${r.text}`;
-  });
+  const filtered = results.filter(r => r.score > 0.75);
+   if (filtered.length > 0) {
+      filtered.forEach((r) => {
+        fullContext += ` #${r.rank} | Score: ${r.score} | Text: ${r.text}`;
+      });
+    } else {
+      // ❌ Low similarity → fallback to plain query
+      fullContext += ` (no relevant stock context found)`;
+    }
+
+  // results.forEach((r) => {
+  //   fullContext += ` #${r.rank} | Score: ${r.score} | Text: ${r.text}`;
+  // });
 }
 
 return fullContext;

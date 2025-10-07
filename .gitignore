@@ -1,2 +1,5 @@
 /ragonbooks
 ragonbooks/
+
+.env*
+**/.env*
