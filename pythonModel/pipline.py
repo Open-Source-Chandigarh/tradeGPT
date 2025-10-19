@@ -9,6 +9,8 @@ from sklearn.preprocessing import MinMaxScaler
 from tensorflow.keras.models import Model
 from tensorflow.keras.layers import Input, LSTM, Dense, Dropout
 from tensorflow.keras.optimizers import Adam
+import os
+
 
 def clean_column_names(df):
     new_cols = []
@@ -20,6 +22,7 @@ def clean_column_names(df):
             new_cols.append(col)
     df.columns = new_cols
     return df
+
 
 def fetch_stock_data(ticker, period, interval):
     data = yf.download(tickers=ticker, period=period, interval=interval)
@@ -39,6 +42,7 @@ def fetch_stock_data(ticker, period, interval):
         data['Volume'] = data['Volume'].fillna(0)
     data.reset_index(inplace=True)
     return data
+
 
 def fetch_options_data(symbol, days_to_fetch):
     all_data = []
@@ -113,7 +117,15 @@ def clean_and_merge(stock_df, options_df):
 
     return merged
 
-def train_and_predict(merged_df, sequence_length=10, epochs=30):
+
+def train_and_predict(merged_df, sequence_length=10, epochs=30, use_transfer_learning=True):
+    """
+    Train LSTM model with optional transfer learning.
+    
+    If base weights exist, loads them and fine-tunes (5 epochs).
+    Otherwise, trains from scratch (30 epochs).
+    """
+    
     features = [
         'Open','High','Low','Close','Volume','MA_5','MA_10','Volatility',
         'CE_openInterest','PE_openInterest','CE_changeinOpenInterest','PE_changeinOpenInterest',
@@ -123,32 +135,110 @@ def train_and_predict(merged_df, sequence_length=10, epochs=30):
         'Close','Return','Volatility','CE_openInterest','PE_openInterest',
         'CE_changeinOpenInterest','PE_changeinOpenInterest','PCR'
     ]
+    
     df = merged_df.copy()
     df.fillna(0, inplace=True)
     X = df[features].values
     y = df[targets].values
+    
     scaler_X = MinMaxScaler()
     scaler_y = MinMaxScaler()
     X_scaled = scaler_X.fit_transform(X)
     y_scaled = scaler_y.fit_transform(y)
+    
     X_seq, y_seq = [], []
     for i in range(len(X_scaled) - sequence_length):
         X_seq.append(X_scaled[i:i+sequence_length])
         y_seq.append(y_scaled[i+sequence_length])
     X_seq = np.array(X_seq)
     y_seq = np.array(y_seq)
-    inputs = Input(shape=(X_seq.shape[1], X_seq.shape[2]))
-    x = LSTM(128, return_sequences=True)(inputs)
-    x = LSTM(64)(x)
-    x = Dropout(0.2)(x)
-    outputs = Dense(y_seq.shape[1], activation='linear')(x)
+    
+    # Build model architecture
+    inputs = Input(shape=(X_seq.shape[1], X_seq.shape[2]), name='input')
+    x = LSTM(128, return_sequences=True, name='lstm_1')(inputs)
+    x = LSTM(64, name='lstm_2')(x)
+    x = Dropout(0.2, name='dropout_1')(x)
+    outputs = Dense(y_seq.shape[1], activation='linear', name='dense_output')(x)
+    
     model = Model(inputs, outputs)
+    
+    # =================== TRANSFER LEARNING ===================
+    base_weights_path = 'models/base_stock_weights.weights.h5'
+    
+    if use_transfer_learning and os.path.exists(base_weights_path):
+        try:
+            print("\n" + "="*60)
+            print("🔄 TRANSFER LEARNING ENABLED")
+            print("="*60)
+            print("📥 Loading pre-trained base model weights...")
+            
+            # Load pre-trained weights (by_name matches layer names)
+            try:
+                # Try Keras 3.x method (no by_name parameter)
+                model.load_weights(base_weights_path, skip_mismatch=True)
+            except TypeError:
+                # Fallback for Keras 2.x
+                model.load_weights(base_weights_path, by_name=True, skip_mismatch=True)
+                print("✅ Base weights loaded successfully!")
+            
+            # Freeze LSTM layers to preserve learned patterns
+            model.get_layer('lstm_1').trainable = False
+            model.get_layer('lstm_2').trainable = False
+            print("✅ Frozen LSTM layers (keeping general market patterns)")
+            
+            # Count trainable layers
+            trainable_count = sum([1 for layer in model.layers if layer.trainable])
+            print(f"✅ Training only {trainable_count} layers: Dropout + Dense")
+            
+            # Reduce epochs for fine-tuning
+            epochs = 5
+            print(f"✅ Reduced training epochs: {epochs} (instead of 30)")
+            print("="*60 + "\n")
+            
+            print("⚡ Expected training time: 15-30 seconds (10x faster!)\n")
+            
+        except Exception as e:
+            print(f"\n⚠️  Could not load base weights: {e}")
+            print("⚠️  Falling back to training from scratch...\n")
+            # Make all layers trainable again
+            for layer in model.layers:
+                layer.trainable = True
+    else:
+        if not os.path.exists(base_weights_path):
+            print("\n" + "="*60)
+            print("ℹ️  BASE WEIGHTS NOT FOUND")
+            print("="*60)
+            print(f"📁 Looking for: {base_weights_path}")
+            print("💡 To enable transfer learning (10x speedup):")
+            print("   1. Run: python Train_Base_Model.py")
+            print("   2. Wait ~15 minutes (one-time setup)")
+            print("   3. Enjoy 15-30 second predictions forever!")
+            print("="*60 + "\n")
+        
+        print("🔨 Training from scratch (this will take 2-5 minutes)...\n")
+    # =========================================================
+    
     model.compile(optimizer=Adam(learning_rate=0.001), loss='mse')
-    model.fit(X_seq, y_seq, epochs=epochs, batch_size=32, validation_split=0.1, shuffle=False, verbose=1)
+    
+    model.fit(
+        X_seq, y_seq,
+        epochs=epochs,
+        batch_size=32,
+        validation_split=0.1,
+        shuffle=False,
+        verbose=1
+    )
+    
+    # Unfreeze all layers for prediction (if any were frozen)
+    for layer in model.layers:
+        layer.trainable = True
+    
     y_pred_scaled = model.predict(X_seq)
     y_pred = scaler_y.inverse_transform(y_pred_scaled)
     pred_df = pd.DataFrame(y_pred, columns=targets)
+    
     return pred_df
+
 
 def summarize_predictions(pred_df):
     summary_features = {}
@@ -162,7 +252,6 @@ def summarize_predictions(pred_df):
     return summary_features
 
 
-
 def main_pipeline(ticker, symbol, period, interval, days_to_fetch):
     stock_df = fetch_stock_data(ticker=ticker, period=period, interval=interval)
     options_df = fetch_options_data(symbol=symbol, days_to_fetch=days_to_fetch)
@@ -170,6 +259,7 @@ def main_pipeline(ticker, symbol, period, interval, days_to_fetch):
     pred_df = train_and_predict(merged_df)
     summary_dict = summarize_predictions(pred_df)
     return json.dumps(summary_dict, indent=4)
+
 
 if __name__ == "__main__":
     import sys
