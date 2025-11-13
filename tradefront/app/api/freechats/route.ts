@@ -29,7 +29,7 @@ export async function POST(req:NextRequest,res:NextResponse) {
     const user = await Users.findOne({email:decoded.email}).exec();
 
 
-    return NextResponse.json({chats:user.freechats},{ status: 200 })
+    return NextResponse.json({chats:user.freechats,paidacc:user.paidacc},{ status: 200 })
   
   } catch (e) {
   console.error(e); 

@@ -24,27 +24,36 @@ def clean_column_names(df):
     return df
 
 
-def fetch_stock_data(ticker, period, interval):
-    data = yf.download(tickers=ticker, period=period, interval=interval)
-    data = data.reset_index()
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = ['_'.join(filter(None, col)).strip() for col in data.columns]
-    data = clean_column_names(data)
-    if 'Date' in data.columns:
-        data.rename(columns={'Date': 'Datetime'}, inplace=True)
-    elif 'Datetime' not in data.columns:
-        data.rename(columns={data.columns[0]: 'Datetime'}, inplace=True)
-    data = data.set_index('Datetime').asfreq('h')
-    for col in ['Open', 'High', 'Low', 'Close']:
-        if col in data.columns:
-            data[col] = data[col].ffill()
-    if 'Volume' in data.columns:
-        data['Volume'] = data['Volume'].fillna(0)
-    data.reset_index(inplace=True)
-    return data
+# def fetch_stock_data(ticker, period, interval):
+#     data = yf.download(tickers=ticker, period=period, interval=interval)
+#     data = data.reset_index()
+
+#     if data.empty:
+#         raise ValueError(f"No stock data fetched for ticker '{ticker}' with period '{period}' and interval '{interval}'")
+
+#     if isinstance(data.columns, pd.MultiIndex):
+#         data.columns = ['_'.join(filter(None, col)).strip() for col in data.columns]
+#     data = clean_column_names(data)
+#     if 'Date' in data.columns:
+#         data.rename(columns={'Date': 'Datetime'}, inplace=True)
+#     elif 'Datetime' not in data.columns:
+#         data.rename(columns={data.columns[0]: 'Datetime'}, inplace=True)
+#     data = data.set_index('Datetime').asfreq('h')
+#     for col in ['Open', 'High', 'Low', 'Close']:
+#         if col in data.columns:
+#             data[col] = data[col].ffill()
+#     if 'Volume' in data.columns:
+#         data['Volume'] = data['Volume'].fillna(0)
+#     data.reset_index(inplace=True)
+#     return data
 
 
-def fetch_options_data(symbol, days_to_fetch):
+
+
+
+
+
+# def fetch_options_data(symbol, days_to_fetch):
     all_data = []
     for i in range(days_to_fetch):
         date = datetime.now() - timedelta(days=i)
@@ -72,11 +81,24 @@ def fetch_options_data(symbol, days_to_fetch):
             pass
         time.sleep(2)
     options_df = pd.DataFrame(all_data)
+    if options_df.empty:
+        raise ValueError(f"No options data fetched for symbol '{symbol}' in the last {days_to_fetch} days")
     options_df['date'] = pd.to_datetime(options_df['date'], errors='coerce')
     return options_df
 
 
-def clean_and_merge(stock_df, options_df):
+
+
+
+    
+    # options_df['date'] = pd.to_datetime(options_df['date'], errors='coerce')
+    # return options_df
+
+
+
+
+
+# def clean_and_merge(stock_df, options_df):
     if 'Datetime' not in stock_df.columns:
         possible = [col for col in stock_df.columns if 'datetime' in col.lower()]
         if possible:
@@ -118,6 +140,141 @@ def clean_and_merge(stock_df, options_df):
     return merged
 
 
+
+
+def fetch_stock_data(ticker, period, interval):
+    import yfinance as yf
+    import pandas as pd
+    
+    data = yf.download(tickers=ticker, period=period, interval=interval, auto_adjust=False, progress=False)
+    
+    # If empty, fallback to daily interval
+    if data.empty and interval != "1d":
+        data = yf.download(tickers=ticker, period=period, interval="1d", auto_adjust=False, progress=False)
+        interval = "1d"
+    
+    # If still empty, create placeholder DataFrame
+    if data.empty:
+        print(f"⚠️ No stock data fetched for {ticker}. Returning placeholder DataFrame.")
+        dates = pd.date_range(end=pd.Timestamp.now(), periods=period_to_hours(period))
+        data = pd.DataFrame({
+            'Datetime': dates,
+            'Open': 0, 'High': 0, 'Low': 0, 'Close': 0, 'Volume': 0
+        })
+    else:
+        data = data.reset_index()
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = ['_'.join(filter(None, col)).strip() for col in data.columns]
+        if 'Date' in data.columns:
+            data.rename(columns={'Date':'Datetime'}, inplace=True)
+        elif 'Datetime' not in data.columns:
+            data.rename(columns={data.columns[0]:'Datetime'}, inplace=True)
+        data['Datetime'] = pd.to_datetime(data['Datetime'], errors='coerce')
+        for col in ['Open','High','Low','Close','Volume']:
+            if col in data.columns:
+                data[col] = pd.to_numeric(data[col], errors='coerce').ffill().fillna(0)
+    
+    return data
+
+def fetch_options_data(symbol, days_to_fetch):
+    all_data = []
+    for i in range(days_to_fetch):
+        date = datetime.now() - timedelta(days=i)
+        if date.weekday() >= 5:
+            continue
+        try:
+            opt_data = nse_optionchain_scrapper(symbol)
+            records = opt_data['records']['data']
+            for rec in records:
+                ce = rec.get('CE', {})
+                pe = rec.get('PE', {})
+                all_data.append({
+                    'date': date.strftime('%Y-%m-%d'),
+                    'strikePrice': rec['strikePrice'],
+                    'CE_openInterest': ce.get('openInterest',0),
+                    'CE_changeinOpenInterest': ce.get('changeinOpenInterest',0),
+                    'CE_volume': ce.get('totalTradedVolume',0),
+                    'CE_ltp': ce.get('lastPrice',0),
+                    'PE_openInterest': pe.get('openInterest',0),
+                    'PE_changeinOpenInterest': pe.get('changeinOpenInterest',0),
+                    'PE_volume': pe.get('totalTradedVolume',0),
+                    'PE_ltp': pe.get('lastPrice',0)
+                })
+        except Exception:
+            continue
+        time.sleep(1)
+    
+    if len(all_data) == 0:
+        print(f"⚠️ No options data fetched for {symbol}. Returning placeholder DataFrame.")
+        columns = ['date','strikePrice','CE_openInterest','CE_changeinOpenInterest','CE_volume','CE_ltp',
+                   'PE_openInterest','PE_changeinOpenInterest','PE_volume','PE_ltp']
+        options_df = pd.DataFrame(columns=columns)
+    else:
+        options_df = pd.DataFrame(all_data)
+        options_df['date'] = pd.to_datetime(options_df['date'], errors='coerce')
+    
+    return options_df
+
+def clean_and_merge(stock_df, options_df):
+    # Ensure OHLC columns exist
+    for col in ['Open','High','Low','Close','Volume']:
+        if col not in stock_df.columns:
+            stock_df[col] = 0
+
+    stock_df['Return'] = stock_df['Close'].pct_change().fillna(0)
+    stock_df['MA_5'] = stock_df['Close'].rolling(5).mean().fillna(method='bfill')
+    stock_df['MA_10'] = stock_df['Close'].rolling(10).mean().fillna(method='bfill')
+    stock_df['Volatility'] = stock_df['Return'].rolling(5).std().fillna(0)
+
+    # Clean options
+    for col in ['CE_openInterest','PE_openInterest','CE_changeinOpenInterest','PE_changeinOpenInterest','CE_volume','PE_volume']:
+        if col not in options_df.columns:
+            options_df[col] = 0
+        else:
+            options_df[col] = pd.to_numeric(options_df[col], errors='coerce').fillna(0)
+
+    if not options_df.empty:
+        options_agg = options_df.groupby('date').agg({
+            'CE_openInterest':'sum','PE_openInterest':'sum',
+            'CE_changeinOpenInterest':'sum','PE_changeinOpenInterest':'sum',
+            'CE_volume':'sum','PE_volume':'sum'
+        }).reset_index()
+        options_agg['PCR'] = options_agg['PE_openInterest'] / (options_agg['CE_openInterest'] + 1e-6)
+        stock_df['date'] = stock_df['Datetime'].dt.date
+        options_agg['date_only'] = options_agg['date'].dt.date
+        merged = pd.merge(stock_df, options_agg, left_on='date', right_on='date_only', how='left').fillna(0)
+    else:
+        merged = stock_df.copy()
+        merged['CE_openInterest'] = 0
+        merged['PE_openInterest'] = 0
+        merged['CE_changeinOpenInterest'] = 0
+        merged['PE_changeinOpenInterest'] = 0
+        merged['CE_volume'] = 0
+        merged['PE_volume'] = 0
+        merged['PCR'] = 0
+
+    merged['hour'] = merged['Datetime'].dt.hour
+    merged['day'] = merged['Datetime'].dt.day
+    merged['weekday'] = merged['Datetime'].dt.weekday
+
+    return merged
+
+def period_to_hours(period_str):
+    # Convert period like '1mo', '2mo' to approximate hours for placeholder
+    unit = period_str[-1]
+    num = int(period_str[:-1])
+    if unit == 'd':
+        return num * 1
+    if unit == 'mo':
+        return num * 30
+    if unit == 'y':
+        return num * 365
+    return num
+
+
+
+
+
 def train_and_predict(merged_df, sequence_length=10, epochs=30, use_transfer_learning=True):
     """
     Train LSTM model with optional transfer learning.
@@ -146,6 +303,11 @@ def train_and_predict(merged_df, sequence_length=10, epochs=30, use_transfer_lea
     X_scaled = scaler_X.fit_transform(X)
     y_scaled = scaler_y.fit_transform(y)
     
+    if len(X_scaled) <= sequence_length:
+        raise ValueError(
+            f"Not enough data to create sequences. Got {len(X_scaled)} rows, sequence_length={sequence_length}. "
+            f"Try using a longer period or a lower interval (e.g., 1d instead of 1h)."
+        )
     X_seq, y_seq = [], []
     for i in range(len(X_scaled) - sequence_length):
         X_seq.append(X_scaled[i:i+sequence_length])
@@ -252,13 +414,39 @@ def summarize_predictions(pred_df):
     return summary_features
 
 
+# def main_pipeline(ticker, symbol, period, interval, days_to_fetch):
+#     stock_df = fetch_stock_data(ticker=ticker, period=period, interval=interval)
+#     options_df = fetch_options_data(symbol=symbol, days_to_fetch=days_to_fetch)
+#     merged_df = clean_and_merge(stock_df, options_df)
+#     pred_df = train_and_predict(merged_df)
+#     summary_dict = summarize_predictions(pred_df)
+#     return json.dumps(summary_dict, indent=4)
+
+
+
 def main_pipeline(ticker, symbol, period, interval, days_to_fetch):
+    # 1️⃣ Check if ticker is valid
+    try:
+        info = yf.Ticker(ticker).info
+        if 'regularMarketPrice' not in info:
+            raise ValueError(f"Ticker {ticker} seems invalid or data unavailable")
+    except Exception as e:
+        raise ValueError(f"Failed to fetch ticker info: {e}")
+
+    # 2️⃣ Fetch stock and options data
     stock_df = fetch_stock_data(ticker=ticker, period=period, interval=interval)
     options_df = fetch_options_data(symbol=symbol, days_to_fetch=days_to_fetch)
+
+    # 3️⃣ Merge and clean
     merged_df = clean_and_merge(stock_df, options_df)
+
+    # 4️⃣ Train LSTM and predict
     pred_df = train_and_predict(merged_df)
+
+    # 5️⃣ Summarize predictions
     summary_dict = summarize_predictions(pred_df)
     return json.dumps(summary_dict, indent=4)
+
 
 
 if __name__ == "__main__":

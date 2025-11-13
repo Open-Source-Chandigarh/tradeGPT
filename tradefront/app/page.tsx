@@ -227,7 +227,8 @@ async function handleStop() {
   }
   if (data.type === "modeltraning") {
     return (
-      <GradientLoadingBar key={i} duration={240} />
+      // <GradientLoadingBar key={i} duration={60} />
+      <div></div>
     )
   }
   if (data.type === "whichstock") {

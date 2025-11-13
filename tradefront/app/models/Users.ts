@@ -11,13 +11,20 @@ const userSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    subscriptiontill:{
+        type: Date,
+        required: false,
+    },
     freechats:{
         type: Number,
         default: 0,
     },
-    chats:{
-        type: Array,
+    chats: [
+    {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: "Chat",
     },
+    ],
     date:{
         type: Date,
         default:Date.now()
@@ -27,7 +34,13 @@ const userSchema = new mongoose.Schema({
     },
     razorpayPaymentId:{
         type: String,
-    }
+    },
+    allchatstitle:{
+        type:Array
+    },
+    chatids:{
+        type:Array
+    },
     })
 
 const User =  mongoose.models.User || mongoose.model('User',userSchema)
